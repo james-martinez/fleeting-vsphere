@@ -29,6 +29,9 @@ type vSphereDeployment struct {
 	settings provider.Settings
 
 	Vsphereurl string
+	Template   string
+	Folder     string
+	Prefix     string
 }
 
 func (k *vSphereDeployment) Init(ctx context.Context, logger hclog.Logger, settings provider.Settings) (provider.ProviderInfo, error) {
@@ -37,6 +40,15 @@ func (k *vSphereDeployment) Init(ctx context.Context, logger hclog.Logger, setti
 	}
 	if k.Vsphereurl == "" {
 		return provider.ProviderInfo{}, fmt.Errorf("please provide vsphereurl in plug_config")
+	}
+	if k.Template == "" {
+		return provider.ProviderInfo{}, fmt.Errorf("please provide template in plug_config")
+	}
+	if k.Folder == "" {
+		return provider.ProviderInfo{}, fmt.Errorf("please provide folder in plug_config")
+	}
+	if k.Prefix == "" {
+		return provider.ProviderInfo{}, fmt.Errorf("please provide prefix in plug_config")
 	}
 	url, err := url.Parse(k.Vsphereurl)
 	if err != nil {
@@ -51,7 +63,7 @@ func (k *vSphereDeployment) Init(ctx context.Context, logger hclog.Logger, setti
 	k.settings = settings
 	return provider.ProviderInfo{
 		ID:        "vSphere",
-		MaxSize:   10,
+		MaxSize:   50,
 		Version:   "0.1.0",
 		BuildInfo: "HEAD",
 	}, nil
@@ -60,7 +72,7 @@ func (k *vSphereDeployment) Init(ctx context.Context, logger hclog.Logger, setti
 func (k *vSphereDeployment) Update(ctx context.Context, fn func(instance string, state provider.State)) error {
 	finder := find.NewFinder(k.client.Client, false)
 
-	folder, err := finder.Folder(ctx, "/FH-Muenster/vm/Robin/")
+	folder, err := finder.Folder(ctx, k.Folder)
 
 	if err != nil {
 		return err
@@ -81,7 +93,7 @@ func (k *vSphereDeployment) Update(ctx context.Context, fn func(instance string,
 				return err
 			}
 
-			if strings.HasPrefix(vmInfo.Name, "ubuntu-child") {
+			if strings.HasPrefix(vmInfo.Name, k.Prefix) {
 				state := determineState(vmInfo)
 				fn(vmInfo.Name, state)
 			}
@@ -92,8 +104,8 @@ func (k *vSphereDeployment) Update(ctx context.Context, fn func(instance string,
 
 func (k *vSphereDeployment) Increase(ctx context.Context, n int) (int, error) {
 
-	srcPath := "/FH-Muenster/vm/Robin/ubuntu-parent"
-	destPath := "/FH-Muenster/vm/Robin/ubuntu-child"
+	srcPath := k.Template
+	destPath := k.Folder
 
 	finder := find.NewFinder(k.client.Client, false)
 	srcVM, _ := finder.VirtualMachine(ctx, srcPath)
@@ -105,20 +117,16 @@ func (k *vSphereDeployment) Increase(ctx context.Context, n int) (int, error) {
 	numClones := n // number of clones
 	var wg sync.WaitGroup
 
-	start := time.Now()
-
 	for i := 1; i <= numClones; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			cloneVM(ctx, k.client, srcVM, destFolderRef, destPath, finder)
+			cloneVM(ctx, k.client, srcVM, destFolderRef, k.Prefix, finder, i)
 		}(i)
 	}
 
 	wg.Wait()
 
-	elapsed := time.Since(start)
-	fmt.Println("The whole process took ", elapsed)
 	return n, nil
 }
 
@@ -126,10 +134,9 @@ func (k *vSphereDeployment) Decrease(ctx context.Context, instances []string) ([
 
 	finder := find.NewFinder(k.client.Client, true)
 
-	if err := deleteVMs(ctx, k.client, finder, "/FH-Muenster/vm/Robin/", instances); err != nil {
+	if err := deleteVMs(ctx, k.client, finder, k.Folder, instances); err != nil {
 		fmt.Printf("Error deleting VMs: %v\n", err)
 	} else {
-		fmt.Println("Successfully deleted VMs")
 	}
 	return instances, nil
 }
@@ -137,7 +144,7 @@ func (k *vSphereDeployment) Decrease(ctx context.Context, instances []string) ([
 func (k *vSphereDeployment) ConnectInfo(ctx context.Context, instance string) (provider.ConnectInfo, error) {
 	finder := find.NewFinder(k.client.Client, true)
 
-	var name = "/FH-Muenster/vm/" + instance
+	var name = k.Folder + instance
 	vm, err := finder.VirtualMachine(ctx, name)
 	if err != nil {
 		return provider.ConnectInfo{}, err
@@ -180,76 +187,30 @@ func (k *vSphereDeployment) ConnectInfo(ctx context.Context, instance string) (p
 	expires := time.Now().Add(5 * time.Minute)
 
 	return provider.ConnectInfo{
-		ID:           instance,
-		InternalAddr: ip,
-		Expires:      &expires,
+		ConnectorConfig: k.settings.ConnectorConfig,
+		ID:              instance,
+		InternalAddr:    ip,
+		Expires:         &expires,
 	}, nil
 }
 
-func cloneVM(ctx context.Context, client *govmomi.Client, srcVM *object.VirtualMachine, destFolderRef types.ManagedObjectReference, destPath string, finder *find.Finder) {
+func cloneVM(ctx context.Context, client *govmomi.Client, srcVM *object.VirtualMachine, destFolderRef types.ManagedObjectReference, prefix string, finder *find.Finder, cloneNumber int) {
 	uuid := uuid.New()
 	req := types.InstantClone_Task{
 		This: srcVM.Reference(),
 		Spec: types.VirtualMachineInstantCloneSpec{
-			Name: fmt.Sprintf("%s-%s", path.Base(destPath), uuid),
+			Name: fmt.Sprintf("%s-%s", prefix, uuid),
 			Location: types.VirtualMachineRelocateSpec{
 				Folder: &destFolderRef,
 			},
 		},
 	}
 
-	start := time.Now()
-	fmt.Printf("Cloning VM %d...\n", cloneNumber)
 	res, _ := methods.InstantClone_Task(ctx, client.Client, &req)
 
 	task := object.NewTask(client.Client, res.Returnval)
 	_ = task.Wait(ctx)
 
-	elapsed := time.Since(start)
-	fmt.Printf("Clone %d succeeded. Took %s\n", cloneNumber, elapsed)
-
-	start = time.Now()
-	fmt.Printf("Waiting for IP for VM %d...\n", cloneNumber)
-
-	clonedVM, _ := finder.VirtualMachine(ctx, fmt.Sprintf("%s-%d", destPath, cloneNumber))
-
-	var ip string
-	var vmInfo mo.VirtualMachine
-
-	for ip == "" {
-		_ = clonedVM.Properties(ctx, clonedVM.Reference(), []string{"guest.net"}, &vmInfo)
-
-		nics := vmInfo.Guest.Net
-		for _, nic := range nics {
-			if ip != "" {
-				break
-			}
-
-			if mac := nic.MacAddress; mac == "" {
-				continue
-			}
-			if nic.IpConfig == nil {
-				continue
-			}
-
-			for _, vmIP := range nic.IpAddress {
-				if net.ParseIP(vmIP).To4() == nil {
-					continue
-				}
-
-				ip = vmIP
-				break
-			}
-		}
-
-		// No IP found on the VM yet
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	fmt.Printf("VM %d IP: %s\n", cloneNumber, ip)
-
-	elapsed = time.Since(start)
-	fmt.Printf("Waiting for IP for VM %d took %s\n", cloneNumber, elapsed)
 }
 
 func deleteVMs(ctx context.Context, client *govmomi.Client, finder *find.Finder, folder string, vmNames []string) error {
