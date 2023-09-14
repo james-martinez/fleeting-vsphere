@@ -3,10 +3,13 @@ module github.com/senk/fleeting-vsphere
 go 1.20
 
 require (
+	github.com/google/uuid v1.3.0
 	github.com/hashicorp/go-hclog v1.5.0
 	github.com/vmware/govmomi v0.30.5
 	gitlab.com/gitlab-org/fleeting/fleeting v0.0.0-20230622215643-1feff9d4ac2e
 )
+
+replace gitlab.com/gitlab-org/fleeting/fleeting => /home/robin/fleeting-vsphere/fleeting/
 
 require (
 	github.com/fatih/color v1.13.0 // indirect
