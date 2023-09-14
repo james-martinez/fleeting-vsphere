@@ -29,8 +29,3 @@ compile:
   artifacts:
     paths:
       - mybinaries
-
-deploy:
-  stage: deploy
-  script: echo "Define your deployment script!"
-  environment: production
