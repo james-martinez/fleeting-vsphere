@@ -9,8 +9,6 @@ require (
 	gitlab.com/gitlab-org/fleeting/fleeting v0.0.0-20230622215643-1feff9d4ac2e
 )
 
-replace gitlab.com/gitlab-org/fleeting/fleeting => /home/robin/fleeting-vsphere/fleeting/
-
 require (
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/golang/protobuf v1.5.0 // indirect
