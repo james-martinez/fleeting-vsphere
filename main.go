@@ -194,6 +194,10 @@ func (k *vSphereDeployment) ConnectInfo(ctx context.Context, instance string) (p
 	}, nil
 }
 
+func (k *vSphereDeployment) Shutdown(ctx context.Context) error {
+	return nil
+}
+
 func cloneVM(ctx context.Context, client *govmomi.Client, srcVM *object.VirtualMachine, destFolderRef types.ManagedObjectReference, prefix string, finder *find.Finder, cloneNumber int) {
 	uuid := uuid.New()
 	req := types.InstantClone_Task{
