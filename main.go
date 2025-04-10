@@ -29,10 +29,20 @@ type vSphereDeployment struct {
 	client   *govmomi.Client
 	settings provider.Settings
 
-	Vsphereurl string
-	Template   string
-	Folder     string
-	Prefix     string
+	Vsphereurl     string
+	Deploytype     string
+	Datacenter     string
+	Host           string
+	Cluster        string
+	Resourcepool   string
+	Datastore      string
+	Contentlibrary string
+	Network        string
+	Template       string
+	Folder         string
+	Cpu            string
+	Memory         string
+	Prefix         string
 }
 
 func (k *vSphereDeployment) Init(ctx context.Context, logger hclog.Logger, settings provider.Settings) (provider.ProviderInfo, error) {

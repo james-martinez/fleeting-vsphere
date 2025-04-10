@@ -1,4 +1,11 @@
 fork of https://git.fh-muenster.de/robin/fleeting-vsphere
+
+# Planned Features
+
+- Integrare library.deploy from govc
+- Integrate vm.clone using VM Template from govc
+- Integrate vm.instantclone from govc
+
 ```
 concurrent = 10
 check_interval = 0
