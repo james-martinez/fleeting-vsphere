@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -60,12 +61,22 @@ func (k *vSphereDeployment) Init(ctx context.Context, logger hclog.Logger, setti
 		return provider.ProviderInfo{}, err
 	}
 
+	version := os.Getenv("VERSION")
+	if version == "" {
+		version = "0.1.0"
+	}
+
+	buildInfo := os.Getenv("BUILD_INFO")
+	if buildInfo == "" {
+		buildInfo = "HEAD"
+	}
+
 	k.settings = settings
 	return provider.ProviderInfo{
 		ID:        "vSphere",
 		MaxSize:   50,
-		Version:   "0.1.0",
-		BuildInfo: "HEAD",
+		Version:   version,
+		BuildInfo: buildInfo,
 	}, nil
 }
 
