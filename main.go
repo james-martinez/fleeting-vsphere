@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"path"
 	"strings"
 	"sync"
@@ -16,8 +15,7 @@ import (
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
-	"github.com/vmware/govmomi/vapi/library"
-	"github.com/vmware/govmomi/vapi/vcenter"
+	"github.com/vmware/govmomi/vim25/methods"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
 	"gitlab.com/gitlab-org/fleeting/fleeting/plugin"
@@ -30,66 +28,10 @@ type vSphereDeployment struct {
 	client   *govmomi.Client
 	settings provider.Settings
 
-	Vsphereurl     string
-	Datacenter     string
-	Cluster        string
-	Resourcepool   string
-	Contentlibrary string
-	Datastore      string
-	Ovftemplate    string
-	Template       string
-	Folder         string
-	Prefix         string
-	Cpu            string
-	Memory         string
-	Portgroup      string
-}
-
-// Add a method in vSphereDeployment to deploy an OVF from the content library
-func (k *vSphereDeployment) DeployOVFFromLibrary(ctx context.Context, libraryName, templateName, vmName string) error {
-	c := k.client.Client
-	m := vcenter.NewManager(c)
-
-	// Find the library item
-	item, err := library.FindItem(ctx, c, libraryName, templateName)
-	if err != nil {
-		return fmt.Errorf("unable to find library item: %v", err)
-	}
-
-	// Setup deployment target
-	finder := find.NewFinder(c, false)
-	rp, err := finder.DefaultResourcePool(ctx)
-	if err != nil {
-		return fmt.Errorf("unable to find resource pool: %v", err)
-	}
-	folder, err := finder.Folder(ctx, k.Folder)
-	if err != nil {
-		return fmt.Errorf("unable to find folder: %v", err)
-	}
-
-	// Setup deployment spec
-	deploy := vcenter.Deploy{
-		DeploymentSpec: vcenter.DeploymentSpec{
-			Name:               vmName,
-			AcceptAllEULA:      true,
-			DefaultDatastoreID: "",  // Set your Datastore ID if required
-			NetworkMappings:    nil, // Set your network mappings
-			StorageProfileID:   "",  // Set your storage profile if required
-		},
-		Target: vcenter.Target{
-			ResourcePoolID: rp.Reference().Value,
-			FolderID:       folder.Reference().Value,
-		},
-	}
-
-	// Deploy the library item
-	ref, err := m.DeployLibraryItem(ctx, item.ID, deploy)
-	if err != nil {
-		return fmt.Errorf("deployment failed: %v", err)
-	}
-
-	fmt.Printf("Deployed VM: %s\n", ref.Value)
-	return nil
+	Vsphereurl string
+	Template   string
+	Folder     string
+	Prefix     string
 }
 
 func (k *vSphereDeployment) Init(ctx context.Context, logger hclog.Logger, settings provider.Settings) (provider.ProviderInfo, error) {
@@ -117,22 +59,13 @@ func (k *vSphereDeployment) Init(ctx context.Context, logger hclog.Logger, setti
 	if err != nil {
 		return provider.ProviderInfo{}, err
 	}
-	version := os.Getenv("VERSION")
-	if version == "" {
-		version = "0.1.0"
-	}
-
-	buildInfo := os.Getenv("BUILD_INFO")
-	if buildInfo == "" {
-		buildInfo = "HEAD"
-	}
 
 	k.settings = settings
 	return provider.ProviderInfo{
 		ID:        "vSphere",
 		MaxSize:   50,
-		Version:   version,
-		BuildInfo: buildInfo,
+		Version:   "0.1.0",
+		BuildInfo: "HEAD",
 	}, nil
 }
 
@@ -266,44 +199,22 @@ func (k *vSphereDeployment) Shutdown(ctx context.Context) error {
 }
 
 func cloneVM(ctx context.Context, client *govmomi.Client, srcVM *object.VirtualMachine, destFolderRef types.ManagedObjectReference, prefix string, finder *find.Finder, cloneNumber int) {
-	manager := library.NewManager(rest.Client)
-
 	uuid := uuid.New()
-	// req := types.InstantClone_Task{
-	// 	This: srcVM.Reference(),
-	// 	Spec: types.VirtualMachineInstantCloneSpec{
-	// 		Name: fmt.Sprintf("%s-%s", prefix, uuid),
-	// 		Location: types.VirtualMachineRelocateSpec{
-	// 			Folder: &destFolderRef,
-	// 		},
-	// 	},
-	// }
-
-	//res, _ := methods.InstantClone_Task(ctx, client.Client, &req)
-
-	// task := object.NewTask(client.Client, res.Returnval)
-	// _ = task.Wait(ctx)
-	deploySpec := vcenter.Deploy{
-		DeploymentSpec: vcenter.DeploymentSpec{
-			Name:               "vm-name",
-			DefaultDatastoreID: "datastore-id",
-			AcceptAllEULA:      true,
-		},
-		Target: vcenter.Target{
-			ResourcePoolID: "resource-pool-id",
-			HostID:         "host-id",   // Optional
-			FolderID:       "folder-id", // Optional
+	req := types.InstantClone_Task{
+		This: srcVM.Reference(),
+		Spec: types.VirtualMachineInstantCloneSpec{
+			Name: fmt.Sprintf("%s-%s", prefix, uuid),
+			Location: types.VirtualMachineRelocateSpec{
+				Folder: &destFolderRef,
+			},
 		},
 	}
 
-	item := library.Item{
-		ID: "library-item-id",
-	}
+	res, _ := methods.InstantClone_Task(ctx, client.Client, &req)
 
-	deployment, err := manager.DeployLibraryItem(ctx, item, deploySpec)
-	if err != nil {
-		log.Fatal(err)
-	}
+	task := object.NewTask(client.Client, res.Returnval)
+	_ = task.Wait(ctx)
+
 }
 
 func deleteVMs(ctx context.Context, client *govmomi.Client, finder *find.Finder, folder string, vmNames []string) error {
