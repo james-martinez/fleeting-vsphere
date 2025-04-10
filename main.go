@@ -61,6 +61,36 @@ func (k *vSphereDeployment) Init(ctx context.Context, logger hclog.Logger, setti
 	if k.Prefix == "" {
 		return provider.ProviderInfo{}, fmt.Errorf("please provide prefix in plug_config")
 	}
+	if k.Deploytype == "" {
+		return provider.ProviderInfo{}, fmt.Errorf("please provide deploytype in plug_config")
+	}
+	if k.Datacenter == "" {
+		return provider.ProviderInfo{}, fmt.Errorf("please provide datacenter in plug_config")
+	}
+	if k.Host == "" {
+		return provider.ProviderInfo{}, fmt.Errorf("please provide host in plug_config")
+	}
+	if k.Cluster == "" {
+		return provider.ProviderInfo{}, fmt.Errorf("please provide cluster in plug_config")
+	}
+	if k.Resourcepool == "" {
+		return provider.ProviderInfo{}, fmt.Errorf("please provide resourcepool in plug_config")
+	}
+	if k.Datastore == "" {
+		return provider.ProviderInfo{}, fmt.Errorf("please provide datastore in plug_config")
+	}
+	if k.Contentlibrary == "" {
+		return provider.ProviderInfo{}, fmt.Errorf("please provide contentlibrary in plug_config")
+	}
+	if k.Network == "" {
+		return provider.ProviderInfo{}, fmt.Errorf("please provide network in plug_config")
+	}
+	if k.Cpu == "" {
+		return provider.ProviderInfo{}, fmt.Errorf("please provide cpu in plug_config")
+	}
+	if k.Memory == "" {
+		return provider.ProviderInfo{}, fmt.Errorf("please provide memory in plug_config")
+	}
 	url, err := url.Parse(k.Vsphereurl)
 	if err != nil {
 		return provider.ProviderInfo{}, err
