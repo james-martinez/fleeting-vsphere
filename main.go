@@ -172,7 +172,7 @@ func (k *vSphereDeployment) Increase(ctx context.Context, n int) (int, error) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			cloneVM(ctx, k.client, srcVM, destFolderRef, k.Prefix, finder, i)
+			deployVM(ctx, k.client, srcVM, destFolderRef, k.Prefix, finder, i)
 		}(i)
 	}
 
@@ -249,7 +249,7 @@ func (k *vSphereDeployment) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func cloneVM(ctx context.Context, client *govmomi.Client, srcVM *object.VirtualMachine, destFolderRef types.ManagedObjectReference, prefix string, finder *find.Finder, cloneNumber int) {
+func deployVM(ctx context.Context, client *govmomi.Client, srcVM *object.VirtualMachine, destFolderRef types.ManagedObjectReference, prefix string, finder *find.Finder, cloneNumber int) {
 	uuid := uuid.New()
 	req := types.InstantClone_Task{
 		This: srcVM.Reference(),
