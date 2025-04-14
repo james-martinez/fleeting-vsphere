@@ -155,6 +155,7 @@ func (k *vSphereDeployment) Update(ctx context.Context, fn func(instance string,
 
 func (k *vSphereDeployment) Increase(ctx context.Context, n int) (int, error) {
 
+	deployType := k.Deploytype
 	srcPath := k.Template
 	destPath := k.Folder
 
@@ -172,7 +173,7 @@ func (k *vSphereDeployment) Increase(ctx context.Context, n int) (int, error) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			deployVM(ctx, k.client, srcVM, destFolderRef, k.Prefix, finder, i)
+			deployVM(ctx, k.client, deployType, srcVM, destFolderRef, k.Prefix, finder, i)
 		}(i)
 	}
 
@@ -249,23 +250,30 @@ func (k *vSphereDeployment) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func deployVM(ctx context.Context, client *govmomi.Client, srcVM *object.VirtualMachine, destFolderRef types.ManagedObjectReference, prefix string, finder *find.Finder, cloneNumber int) {
+func deployVM(ctx context.Context, client *govmomi.Client, deployType string, srcVM *object.VirtualMachine, destFolderRef types.ManagedObjectReference, prefix string, finder *find.Finder, cloneNumber int) {
 	uuid := uuid.New()
-	req := types.InstantClone_Task{
-		This: srcVM.Reference(),
-		Spec: types.VirtualMachineInstantCloneSpec{
-			Name: fmt.Sprintf("%s-%s", prefix, uuid),
-			Location: types.VirtualMachineRelocateSpec{
-				Folder: &destFolderRef,
+
+	switch deploytype := deployType; deploytype {
+	case "instantclone":
+		req := types.InstantClone_Task{
+			This: srcVM.Reference(),
+			Spec: types.VirtualMachineInstantCloneSpec{
+				Name: fmt.Sprintf("%s-%s", prefix, uuid),
+				Location: types.VirtualMachineRelocateSpec{
+					Folder: &destFolderRef,
+				},
 			},
-		},
+		}
+
+		res, _ := methods.InstantClone_Task(ctx, client.Client, &req)
+
+		task := object.NewTask(client.Client, res.Returnval)
+		_ = task.Wait(ctx)
+	case "clone":
+	case "librarydeploy":
+	default:
+		fmt.Printf("Unsupported operation: %s", deploytype)
 	}
-
-	res, _ := methods.InstantClone_Task(ctx, client.Client, &req)
-
-	task := object.NewTask(client.Client, res.Returnval)
-	_ = task.Wait(ctx)
-
 }
 
 func deleteVMs(ctx context.Context, client *govmomi.Client, finder *find.Finder, folder string, vmNames []string) error {
