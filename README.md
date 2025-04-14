@@ -12,7 +12,7 @@ check_interval = 0
 
 [[runners]]
   name = "DESKTOP-4M70UBK"
-  url = "https://git.fh-muenster.de"
+  url = "https://gitlab.tld"
   token = "<token>"
   executor = "docker-autoscaler"
   limit = 40
@@ -23,13 +23,23 @@ check_interval = 0
   [runners.autoscaler]
     capacity_per_instance = 1
     max_use_count = 1
-    max_instances = 15
+    max_instances = 5
     plugin = "fleeting-vsphere"
     [runners.autoscaler.plugin_config]
-      vsphereurl = "https://<user>:<pw>@vc-prod.vmware.fh-muenster.de/sdk"
+      vsphereurl = "https://<user>:<pw>@vsphere.tld/sdk"
+      deploytype =  "contentlibrary"
+      datacenter = ""
+      host = ""
+      cluster = ""
+      resourcepool = ""
+      datastore = ""
+      contentlibrary = ""
+      network = ""
       folder = "/FH-Muenster/vm/Robin/"
       prefix = "prefix-test"
       template = "/FH-Muenster/vm/Robin/ubuntu-parent"
+      cpu = "2"
+      memory = "4096"
     [runners.autoscaler.connector_config]
       username = "user"
       password = "Passw0rd"
