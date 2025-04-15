@@ -173,7 +173,8 @@ func (k *vSphereDeployment) Increase(ctx context.Context, n int) (int, error) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			deployVM(ctx, k.client, deployType, srcVM, destFolderRef, k.Prefix, finder, i)
+			deployVM(ctx, k.client, deployType, srcVM, destFolderRef, k.Prefix, finder, i, k.Datacenter, k.Host, k.Cluster, k.Resourcepool, k.Datastore, k.Contentlibrary,
+				k.Network, k.Cpu, k.Memory)
 		}(i)
 	}
 
@@ -248,9 +249,14 @@ func (k *vSphereDeployment) ConnectInfo(ctx context.Context, instance string) (p
 
 func (k *vSphereDeployment) Shutdown(ctx context.Context) error {
 	return nil
-}
 
-func deployVM(ctx context.Context, client *govmomi.Client, deployType string, srcVM *object.VirtualMachine, destFolderRef types.ManagedObjectReference, prefix string, finder *find.Finder, cloneNumber int) {
+}
+func deployVM(ctx context.Context, client *govmomi.Client, deployType string,
+	srcVM *object.VirtualMachine, destFolderRef types.ManagedObjectReference,
+	prefix string, finder *find.Finder, cloneNumber int,
+	datacenter string, host string, cluster string, resourcePool string,
+	datastore string, contentLibrary string, network string,
+	cpu string, memory string) {
 	uuid := uuid.New()
 
 	switch deploytype := deployType; deploytype {
@@ -272,7 +278,7 @@ func deployVM(ctx context.Context, client *govmomi.Client, deployType string, sr
 	case "clone":
 	case "librarydeploy":
 	default:
-		fmt.Printf("Unsupported operation: %s", deploytype)
+		fmt.Printf("Unsupported deploytype: %s", deploytype)
 	}
 }
 
