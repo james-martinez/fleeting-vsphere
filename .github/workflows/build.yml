@@ -1,10 +1,15 @@
-name: Go CI/CD
+name: Go CI/CD with Docker
 
 on:
   push:
     branches: ["*"] # Runs on any branch
+    tags: ['v*'] # Runs on version tags
   pull_request:
     branches: ["*"] # Runs on PRs to any branch
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   test:
@@ -38,11 +43,156 @@ jobs:
           VERSION: "0.0.1"
           BUILD_INFO: ${{ github.ref }}-${{ github.ref_type }}-${{ github.sha }}
         run: |
-          mkdir -p mybinaries
-          go build -o mybinaries ./...
+          mkdir -p fleeting-vsphere
+          go build -o fleeting-vsphere ./...
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mybinaries
-          path: mybinaries
+          name: fleeting-vsphere
+          path: fleeting-vsphere
+
+  docker-amd64:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch,suffix=-amd64
+            type=ref,event=pr,suffix=-amd64
+            type=semver,pattern={{version}},suffix=-amd64
+            type=semver,pattern={{major}}.{{minor}},suffix=-amd64
+            type=semver,pattern={{major}},suffix=-amd64
+            type=raw,value=latest-amd64,enable={{is_default_branch}}
+
+      - name: Build and push Docker image (AMD64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            BUILD_INFO=github-actions
+          cache-from: type=gha,scope=amd64
+          cache-to: type=gha,mode=max,scope=amd64
+
+  docker-arm64:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch,suffix=-arm64
+            type=ref,event=pr,suffix=-arm64
+            type=semver,pattern={{version}},suffix=-arm64
+            type=semver,pattern={{major}}.{{minor}},suffix=-arm64
+            type=semver,pattern={{major}},suffix=-arm64
+            type=raw,value=latest-arm64,enable={{is_default_branch}}
+
+      - name: Build and push Docker image (ARM64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            BUILD_INFO=github-actions
+          cache-from: type=gha,scope=arm64
+          cache-to: type=gha,mode=max,scope=arm64
+
+  docker-manifest:
+    needs: [docker-amd64, docker-arm64]
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Create and push multi-platform manifest
+        run: |
+          for tag in ${{ steps.meta.outputs.tags }}; do
+            docker manifest create $tag \
+              $tag-amd64 \
+              $tag-arm64
+            docker manifest push $tag
+          done
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
