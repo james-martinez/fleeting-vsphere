@@ -43,14 +43,14 @@ jobs:
           VERSION: "0.0.1"
           BUILD_INFO: ${{ github.ref }}-${{ github.ref_type }}-${{ github.sha }}
         run: |
-          mkdir -p mybinaries
-          go build -o mybinaries ./...
+          mkdir -p fleeting-vsphere
+          go build -o fleeting-vsphere ./...
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mybinaries
-          path: mybinaries
+          name: fleeting-vsphere
+          path: fleeting-vsphere
 
   docker:
     needs: test
