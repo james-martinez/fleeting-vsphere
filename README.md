@@ -122,6 +122,7 @@ check_interval = 0
 ```bash
 go build -o fleeting-vsphere .
 ```
+
 ## Installation
 
 ### OCI Registry Distribution
