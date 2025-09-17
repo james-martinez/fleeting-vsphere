@@ -21,7 +21,7 @@ ARG VERSION=latest
 ARG BUILD_INFO=docker
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-w -s" \
     -o fleeting-vsphere \
     .
