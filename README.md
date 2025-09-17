@@ -62,7 +62,7 @@ check_interval = 0
     capacity_per_instance = 1
     max_use_count = 1
     max_instances = 5
-    plugin = "fleeting-vsphere"
+    plugin = "ghcr.io/james-martinez/fleeting-vsphere:latest"  # OCI registry image
     [runners.autoscaler.plugin_config]
       vsphereurl = "https://<user>:<password>@vcenter.example.com/sdk"
       deploytype = "librarydeploy"  # Options: "librarydeploy"/"contentlibrary", "clone", "instantclone"
@@ -122,6 +122,102 @@ check_interval = 0
 ```bash
 go build -o fleeting-vsphere .
 ```
+## Installation
+
+### OCI Registry Distribution
+
+The fleeting-vsphere plugin is available as a container image from GitHub Container Registry:
+
+```bash
+# Pull the latest version
+docker pull ghcr.io/james-martinez/fleeting-vsphere:latest
+
+# Pull a specific version
+docker pull ghcr.io/james-martinez/fleeting-vsphere:v1.0.0
+```
+
+### GitLab Runner Configuration with OCI Image
+
+Configure GitLab Runner to use the containerized plugin directly from the registry:
+
+```toml
+concurrent = 10
+check_interval = 0
+
+[[runners]]
+  name = "vsphere-runner"
+  url = "https://gitlab.example.com"
+  token = "<your-token>"
+  executor = "docker-autoscaler"
+  limit = 40
+  [runners.docker]
+    image = "busybox:latest"
+  [runners.autoscaler]
+    capacity_per_instance = 1
+    max_use_count = 1
+    max_instances = 5
+    # Use the OCI image directly from registry
+    plugin = "ghcr.io/james-martinez/fleeting-vsphere:latest"
+    [runners.autoscaler.plugin_config]
+      vsphereurl = "https://<user>:<password>@vcenter.example.com/sdk"
+      deploytype = "librarydeploy"
+      datacenter = "Datacenter1"
+      host = "esxi-host.example.com"
+      cluster = "Cluster1"
+      resourcepool = "ResourcePool1"
+      datastore = "datastore1"
+      contentlibrary = "GitLab-Templates"
+      network = "VM Network"
+      folder = "/Datacenter1/vm/GitLab-Runners/"
+      prefix = "gitlab-runner"
+      template = "ubuntu-20.04-template"
+      cpu = "2"
+      memory = "4096"
+    [runners.autoscaler.connector_config]
+      username = "gitlab"
+      password = "SecurePassword123"
+      use_static_credentials = true
+      timeout = "1m"
+    [[runners.autoscaler.policy]]
+      idle_count = 5
+      idle_time = "10m"
+```
+
+### GitLab Runner Registration
+
+When registering a GitLab Runner with fleeting support, GitLab Runner will automatically pull and manage the container:
+
+```bash
+# Register GitLab Runner with fleeting-vsphere plugin
+gitlab-runner register \
+  --url "https://gitlab.example.com" \
+  --token "your-registration-token" \
+  --executor "docker-autoscaler" \
+  --docker-image "busybox:latest" \
+  --description "vSphere Fleeting Runner"
+
+# The plugin configuration is handled in config.toml as shown above
+```
+
+### Available Tags
+
+- `latest` - Latest stable release
+- `v1.0.0`, `v1.1.0`, etc. - Specific version releases
+- `main` - Latest development build
+- `develop` - Development branch builds
+
+### Building Locally (Optional)
+
+If you prefer to build the image locally instead of using the registry:
+
+```bash
+# Build the image
+docker build -t fleeting-vsphere:latest .
+
+# Or build with specific version
+docker build -t fleeting-vsphere:v1.0.0 --build-arg VERSION=v1.0.0 .
+```
+
 
 ## Testing
 
