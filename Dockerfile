@@ -27,7 +27,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     .
 
 # Final stage - minimal runtime image
-FROM alpine:3.19
+FROM alpine:3.22.1
 
 # Install runtime dependencies
 RUN apk add --no-cache ca-certificates tzdata
