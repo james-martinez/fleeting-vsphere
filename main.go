@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,9 +46,6 @@ type vSphereDeployment struct {
 }
 
 func (k *vSphereDeployment) Init(ctx context.Context, logger hclog.Logger, settings provider.Settings) (provider.ProviderInfo, error) {
-	if !settings.UseStaticCredentials {
-		return provider.ProviderInfo{}, fmt.Errorf("this plugin cannot provision credentials")
-	}
 	if k.Vsphereurl == "" {
 		return provider.ProviderInfo{}, fmt.Errorf("please provide vsphereurl in plug_config")
 	}
@@ -129,6 +125,12 @@ func (k *vSphereDeployment) Update(ctx context.Context, fn func(instance string,
 
 	finder := find.NewFinder(k.client.Client, false)
 
+	dc, err := finder.Datacenter(ctx, k.Datacenter)
+	if err != nil {
+		return fmt.Errorf("failed to find datacenter '%s': %w", k.Datacenter, err)
+	}
+	finder.SetDatacenter(dc)
+
 	folder, err := finder.Folder(ctx, k.Folder)
 
 	if err != nil {
@@ -167,28 +169,54 @@ func (k *vSphereDeployment) Increase(ctx context.Context, n int) (int, error) {
 
 	deployType := k.Deploytype
 	srcPath := k.Template
-	destPath := k.Folder
 
 	finder := find.NewFinder(k.client.Client, false)
-	srcVM, _ := finder.VirtualMachine(ctx, srcPath)
 
-	destFolder, _ := finder.Folder(ctx, path.Dir(destPath))
+	dc, err := finder.Datacenter(ctx, k.Datacenter)
+	if err != nil {
+		return 0, fmt.Errorf("failed to find datacenter '%s': %w", k.Datacenter, err)
+	}
+	finder.SetDatacenter(dc)
+
+	srcVM, err := finder.VirtualMachine(ctx, srcPath)
+	if err != nil {
+		return 0, fmt.Errorf("failed to find source template VM '%s': %w", srcPath, err)
+	}
+
+	destFolder, err := finder.Folder(ctx, k.Folder)
+	if err != nil {
+		return 0, fmt.Errorf("failed to find destination folder '%s': %w", k.Folder, err)
+	}
 
 	destFolderRef := destFolder.Reference()
 
-	numClones := n // number of clones
 	var wg sync.WaitGroup
+	var errs []error
+	var mu sync.Mutex
 
-	for i := 1; i <= numClones; i++ {
+	for i := 0; i < n; i++ {
 		wg.Add(1)
-		go func(i int) {
+		go func(cloneNumber int) {
 			defer wg.Done()
-			deployVM(ctx, k.client, deployType, srcVM, destFolderRef, k.Prefix, finder, i, k.Datacenter, k.Host, k.Cluster, k.Resourcepool, k.Datastore, k.Contentlibrary,
-				k.Network, k.Cpu, k.Memory)
+			err := deployVM(ctx, k.client, deployType, srcVM, destFolderRef, k.Prefix, finder, cloneNumber, k.Datacenter, k.Host, k.Cluster, k.Resourcepool, k.Datastore, k.Contentlibrary, k.Network, k.Cpu, k.Memory)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+			}
 		}(i)
 	}
 
 	wg.Wait()
+
+	if len(errs) > 0 {
+		// Combine errors into a single error
+		var errorMessages []string
+		for _, err := range errs {
+			errorMessages = append(errorMessages, err.Error())
+		}
+		return n - len(errs), fmt.Errorf("failed to deploy all VMs: %s", strings.Join(errorMessages, "; "))
+	}
 
 	return n, nil
 }
@@ -201,9 +229,14 @@ func (k *vSphereDeployment) Decrease(ctx context.Context, instances []string) ([
 
 	finder := find.NewFinder(k.client.Client, true)
 
+	dc, err := finder.Datacenter(ctx, k.Datacenter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find datacenter '%s': %w", k.Datacenter, err)
+	}
+	finder.SetDatacenter(dc)
+
 	if err := deleteVMs(ctx, k.client, finder, k.Folder, instances); err != nil {
-		fmt.Printf("Error deleting VMs: %v\n", err)
-	} else {
+		return nil, fmt.Errorf("error deleting VMs: %w", err)
 	}
 	return instances, nil
 }
@@ -221,8 +254,13 @@ func (k *vSphereDeployment) ConnectInfo(ctx context.Context, instance string) (p
 
 	finder := find.NewFinder(k.client.Client, true)
 
-	var name = k.Folder + instance
-	vm, err := finder.VirtualMachine(ctx, name)
+	dc, err := finder.Datacenter(ctx, k.Datacenter)
+	if err != nil {
+		return provider.ConnectInfo{}, fmt.Errorf("failed to find datacenter '%s': %w", k.Datacenter, err)
+	}
+	finder.SetDatacenter(dc)
+
+	vm, err := finder.VirtualMachine(ctx, k.Folder+instance)
 	if err != nil {
 		return provider.ConnectInfo{}, err
 	}
@@ -280,7 +318,7 @@ func deployVM(ctx context.Context, client *govmomi.Client, deployType string,
 	prefix string, finder *find.Finder, cloneNumber int,
 	datacenter string, host string, cluster string, resourcePool string,
 	datastore string, contentLibrary string, network string,
-	cpu string, memory string) {
+	cpu string, memory string) error {
 	uuid := uuid.New()
 	vmName := fmt.Sprintf("%s-%s", prefix, uuid)
 
@@ -289,23 +327,24 @@ func deployVM(ctx context.Context, client *govmomi.Client, deployType string,
 		err := deployVMInstantClone(ctx, client, srcVM, vmName, destFolderRef, finder,
 			datacenter, host, cluster, resourcePool, datastore, network, cpu, memory)
 		if err != nil {
-			fmt.Printf("Error creating instant clone: %v\n", err)
+			return fmt.Errorf("error creating instant clone: %w", err)
 		}
 	case "clone":
 		err := deployVMClone(ctx, client, srcVM, vmName, destFolderRef, finder,
 			datacenter, host, cluster, resourcePool, datastore, network, cpu, memory)
 		if err != nil {
-			fmt.Printf("Error creating clone: %v\n", err)
+			return fmt.Errorf("error creating clone: %w", err)
 		}
 	case "librarydeploy", "contentlibrary":
 		err := deployFromContentLibrary(ctx, client, vmName, contentLibrary, srcVM.Name(),
 			destFolderRef, finder, datacenter, host, cluster, resourcePool, datastore, network, cpu, memory)
 		if err != nil {
-			fmt.Printf("Error deploying from content library: %v\n", err)
+			return fmt.Errorf("error deploying from content library: %w", err)
 		}
 	default:
-		fmt.Printf("Unsupported deploytype: %s", deploytype)
+		return fmt.Errorf("unsupported deploytype: %s", deploytype)
 	}
+	return nil
 }
 
 func deleteVMs(ctx context.Context, client *govmomi.Client, finder *find.Finder, folder string, vmNames []string) error {
@@ -316,16 +355,22 @@ func deleteVMs(ctx context.Context, client *govmomi.Client, finder *find.Finder,
 			return fmt.Errorf("error finding VM %s: %v", name, err)
 		}
 
-		task, err := vm.PowerOff(ctx)
+		powerState, err := vm.PowerState(ctx)
 		if err != nil {
-			return fmt.Errorf("error powering off VM %s: %v", vmName, err)
+			return fmt.Errorf("error getting power state for VM %s: %w", vmName, err)
 		}
 
-		if err := task.Wait(ctx); err != nil {
-			return fmt.Errorf("error waiting for power off task for VM %s: %v", vmName, err)
+		if powerState != types.VirtualMachinePowerStatePoweredOff {
+			task, err := vm.PowerOff(ctx)
+			if err != nil {
+				return fmt.Errorf("error powering off VM %s: %w", vmName, err)
+			}
+			if err := task.Wait(ctx); err != nil {
+				return fmt.Errorf("error waiting for power off task for VM %s: %w", vmName, err)
+			}
 		}
 
-		task, err = vm.Destroy(ctx)
+		task, err := vm.Destroy(ctx)
 		if err != nil {
 			return fmt.Errorf("error destroying VM %s: %v", vmName, err)
 		}

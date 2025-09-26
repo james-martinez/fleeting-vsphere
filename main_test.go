@@ -2,197 +2,172 @@ package main
 
 import (
 	"context"
-	"gitlab.com/gitlab-org/fleeting/fleeting/provider"
-	"reflect"
+	"net/url"
 	"testing"
+
+	"github.com/vmware/govmomi"
+	"github.com/vmware/govmomi/find"
+	"github.com/vmware/govmomi/simulator"
+	"github.com/vmware/govmomi/vim25"
+	"gitlab.com/gitlab-org/fleeting/fleeting/provider"
 )
 
-func Test_vSphereDeployment_Increase(t *testing.T) {
-	type fields struct {
-		settings provider.Settings
-	}
-	type args struct {
-		ctx context.Context
-		n   int
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    int
-		wantErr bool
-	}{
-		{
-			name: "Case 1: Valid increase",
-			fields: fields{
-				settings: provider.Settings{
-					// fill with your settings
-				},
-			},
-			args: args{
-				ctx: context.Background(), // for example, a background context
-				n:   5,                    // example value for increasing
-			},
-			want:    5,     // expected result after increase
-			wantErr: false, // we don't expect an error in this case
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			k := &vSphereDeployment{
-				settings: tt.fields.settings,
-			}
-			got, err := k.Increase(tt.args.ctx, tt.args.n)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Increase() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if got != tt.want {
-				t.Errorf("Increase() got = %v, want %v", got, tt.want)
-			}
-		})
+// withTestVSphere sets up a simulator and runs the provided test function.
+func withTestVSphere(t *testing.T, testFunc func(context.Context, *vSphereDeployment)) {
+	model := simulator.VPX()
+	defer model.Remove()
+
+	err := model.Run(func(ctx context.Context, c *vim25.Client) error {
+		s := c.URL()
+		s.User = url.UserPassword("user", "pass")
+
+		client, err := govmomi.NewClient(ctx, s, true)
+		if err != nil {
+			return err
+		}
+
+		deployment := &vSphereDeployment{
+			client:         client,
+			settings:       provider.Settings{},
+			Vsphereurl:     s.String(),
+			Deploytype:     "clone",
+			Datacenter:     "DC0",
+			Host:           "DC0_H0",
+			Cluster:        "DC0_C0",
+			Resourcepool:   "/DC0/host/DC0_C0/Resources",
+			Datastore:      "LocalDS_0",
+			Contentlibrary: "test-library",
+			Network:        "VM Network",
+			Template:       "DC0_H0_VM0",
+			Folder:         "/DC0/vm/",
+			Prefix:         "test-vm",
+			Cpu:            "1",
+			Memory:         "1024",
+		}
+
+		testFunc(ctx, deployment)
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("model.Run() failed: %v", err)
 	}
 }
 
-func Test_vSphereDeployment_Decrease(t *testing.T) {
-	type fields struct {
-		settings provider.Settings
-	}
-	type args struct {
-		ctx       context.Context
-		instances []string
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    []string
-		wantErr bool
-	}{
-		{
-			name: "Case 1: Valid decrease",
-			fields: fields{
-				settings: provider.Settings{
-					// fill with your settings
-				},
-			},
-			args: args{
-				ctx:       context.Background(),                                                                               // for example, a background context
-				instances: []string{"ubuntu-child-1", "ubuntu-child-2", "ubuntu-child-3", "ubuntu-child-4", "ubuntu-child-5"}, // example instance names
-			},
-			want:    []string{"ubuntu-child-1", "ubuntu-child-2", "ubuntu-child-3", "ubuntu-child-4", "ubuntu-child-5"}, // expected result after decrease (for instance, "instance3" might have been removed)
-			wantErr: false,                                                                                              // we don't expect an error in this case
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			k := &vSphereDeployment{
-				settings: tt.fields.settings,
-			}
-			got, err := k.Decrease(tt.args.ctx, tt.args.instances)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Decrease() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Decrease() got = %v, want %v", got, tt.want)
-			}
-		})
-	}
+func TestVSphereDeployment_Init(t *testing.T) {
+	withTestVSphere(t, func(ctx context.Context, deployment *vSphereDeployment) {
+		info, err := deployment.Init(ctx, nil, provider.Settings{})
+		if err != nil {
+			t.Fatalf("Init() failed: %v", err)
+		}
+
+		if info.ID != "vSphere" {
+			t.Errorf("Expected provider ID to be 'vSphere', got '%s'", info.ID)
+		}
+	})
 }
 
-func Test_vSphereDeployment_ConnectInfo(t *testing.T) {
-	type fields struct {
-		settings provider.Settings
-	}
-	type args struct {
-		ctx      context.Context
-		instance string
-	}
+func TestVSphereDeployment_Increase(t *testing.T) {
+	withTestVSphere(t, func(ctx context.Context, deployment *vSphereDeployment) {
+		n, err := deployment.Increase(ctx, 1)
+		if err != nil {
+			t.Fatalf("Increase() failed: %v", err)
+		}
 
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    provider.ConnectInfo
-		wantErr bool
-	}{
-		{
-			name: "Case 1: Valid IP",
-			fields: fields{
-				settings: provider.Settings{
-					// fill with your settings
-				},
-			},
-			args: args{
-				ctx:      context.Background(), // for example, a background context
-				instance: "vc-prod",            // example value for increasing
-			},
-			want: provider.ConnectInfo{
-				ID:           "vc-prod",
-				InternalAddr: "10.42.144.11",
-			}, // expected result after increase
-			wantErr: false, // we don't expect an error in this case
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			k := &vSphereDeployment{
-				settings: tt.fields.settings,
-			}
-			got, err := k.ConnectInfo(tt.args.ctx, tt.args.instance)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ConnectInfo() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ConnectInfo() got = %v, want %v", got, tt.want)
-			}
-		})
-	}
+		if n != 1 {
+			t.Errorf("Expected to increase by 1, but got %d", n)
+		}
+
+		// Verify that the VM was created.
+		finder := find.NewFinder(deployment.client.Client, true)
+		dc, err := finder.Datacenter(ctx, "DC0")
+		if err != nil {
+			t.Fatalf("Could not find datacenter: %v", err)
+		}
+		finder.SetDatacenter(dc)
+
+		vms, err := finder.VirtualMachineList(ctx, "/DC0/vm/test-vm-*")
+		if err != nil {
+			t.Fatalf("Could not list VMs: %v", err)
+		}
+		if len(vms) != 1 {
+			t.Errorf("Expected 1 VM to be created, but found %d", len(vms))
+		}
+	})
 }
 
-func Test_vSphereDeployment_Update(t *testing.T) {
-	type fields struct {
-		settings provider.Settings
-	}
-	type args struct {
-		ctx context.Context
-		fn  func(instance string, state provider.State)
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr bool
-	}{
-		{
-			name: "Case 1: Valid IP",
-			fields: fields{
-				settings: provider.Settings{
-					// fill with your settings
-				},
-			},
-			args: args{
-				ctx: context.Background(), // for example, a background context
-				fn:  echofunc,             // example value for increasing
-			},
-			wantErr: false, // we don't expect an error in this case
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			k := &vSphereDeployment{
-				settings: tt.fields.settings,
-			}
-			if err := k.Update(tt.args.ctx, tt.args.fn); (err != nil) != tt.wantErr {
-				t.Errorf("Update() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
+func TestVSphereDeployment_Decrease(t *testing.T) {
+	withTestVSphere(t, func(ctx context.Context, deployment *vSphereDeployment) {
+		// First, increase to have a VM to delete
+		_, err := deployment.Increase(ctx, 1)
+		if err != nil {
+			t.Fatalf("Increase() failed, cannot proceed with Decrease test: %v", err)
+		}
+
+		// Find the created VM
+		finder := find.NewFinder(deployment.client.Client, true)
+		dc, err := finder.Datacenter(ctx, "DC0")
+		if err != nil {
+			t.Fatalf("Could not find datacenter: %v", err)
+		}
+		finder.SetDatacenter(dc)
+
+		vms, err := finder.VirtualMachineList(ctx, "/DC0/vm/test-vm-*")
+		if err != nil {
+			t.Fatalf("Could not list VMs to find one to delete: %v", err)
+		}
+		if len(vms) == 0 {
+			t.Fatal("No VMs found to decrease")
+		}
+
+		vmName := vms[0].Name()
+		_, err = deployment.Decrease(ctx, []string{vmName})
+		if err != nil {
+			t.Fatalf("Decrease() failed: %v", err)
+		}
+
+		// Verify the VM was deleted
+		_, err = finder.VirtualMachineList(ctx, "/DC0/vm/test-vm-*")
+		if err == nil {
+			t.Fatal("Expected an error when listing deleted VMs, but got nil")
+		}
+		if _, ok := err.(*find.NotFoundError); !ok {
+			t.Fatalf("Expected a NotFoundError, but got: %v", err)
+		}
+	})
 }
 
-func echofunc(instance string, state provider.State) {
-	println(instance)
-	println(state)
+func TestVSphereDeployment_ConnectInfo(t *testing.T) {
+	withTestVSphere(t, func(ctx context.Context, deployment *vSphereDeployment) {
+		// The default simulator VM does not have an IP.
+		// We expect an error here.
+		_, err := deployment.ConnectInfo(ctx, "DC0_H0_VM0")
+		if err == nil {
+			t.Fatal("ConnectInfo() should have failed for a VM with no IP, but it did not.")
+		}
+	})
+}
+
+func TestVSphereDeployment_Update(t *testing.T) {
+	withTestVSphere(t, func(ctx context.Context, deployment *vSphereDeployment) {
+		// First, create a VM to be updated
+		_, err := deployment.Increase(ctx, 1)
+		if err != nil {
+			t.Fatalf("Increase() failed, cannot proceed with Update test: %v", err)
+		}
+
+		var updatedInstances []string
+		fn := func(instance string, state provider.State) {
+			updatedInstances = append(updatedInstances, instance)
+		}
+
+		err = deployment.Update(ctx, fn)
+		if err != nil {
+			t.Fatalf("Update() failed: %v", err)
+		}
+
+		if len(updatedInstances) != 1 {
+			t.Errorf("Expected to find 1 instance, but got %d", len(updatedInstances))
+		}
+	})
 }
